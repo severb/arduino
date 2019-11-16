@@ -44,7 +44,9 @@
 #include <string.h>
 #include <limits.h>
 
-#define BAUD_RATE 230400
+#define BAUD_SLOW 9600
+#define BAUD_FAST 230400
+
 #define PIN_CE 41
 #define PIN_WE 40
 #define PIN_OE 39
@@ -64,6 +66,22 @@
 #define MAX_ADDR 32767U
 
 // Chip state invariant: CE, WE and OE are HIGH in between calls
+
+static bool fastBaud = true;
+
+static inline void setFastBaud() {
+  Serial.begin(BAUD_FAST);
+  fastBaud = true;
+}
+
+static inline void setSlowBaud() {
+  Serial.begin(BAUD_SLOW);
+  fastBaud = false;
+}
+
+static inline bool isFastBaud() {
+  return fastBaud;
+}
 
 static inline void setAddr(unsigned short addr) {
   if (addr > MAX_ADDR) {
@@ -189,7 +207,6 @@ writeBlock:
   for (byte i = 0; i < len; i++) {
     setAddr(addr + i);
     if (data[i] != readData()) {
-      Serial.println("bad block, retrying");
       readDisable();
       chipDisable();
       goto writeBlock;
@@ -251,23 +268,24 @@ static void lock() {
 }
 
 static void user() {
+  // send custom data manually entered here
   byte data[] = {
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
-    0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
-    0x02, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
-    0x03, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
-    0x04, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
-    0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
-    0x06, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
-    0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
-    0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
-    0x09, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
-    0x0a, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
-    0x0b, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
-    0x0c, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
-    0x0d, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
-    0x0e, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
-    0x0f, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01,
+    0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07,
+    0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f,
+    0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
+    0x18, 0x19, 0x1a, 0x1b, 0x1c, 0x1d, 0x1e, 0x1f,
+    0x20, 0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27,
+    0x28, 0x29, 0x2a, 0x2b, 0x2c, 0x2d, 0x2e, 0x2f,
+    0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37,
+    0x38, 0x39, 0x3a, 0x3b, 0x3c, 0x3d, 0x3e, 0x3f,
+    0x40, 0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47,
+    0x48, 0x49, 0x4a, 0x4b, 0x4c, 0x4d, 0x4e, 0x4f,
+    0x50, 0x51, 0x52, 0x53, 0x54, 0x55, 0x56, 0x57,
+    0x58, 0x59, 0x5a, 0x5b, 0x5c, 0x5d, 0x5e, 0x5f,
+    0x60, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67,
+    0x68, 0x69, 0x6a, 0x6b, 0x6c, 0x6d, 0x6e, 0x6f,
+    0x70, 0x71, 0x72, 0x73, 0x74, 0x75, 0x76, 0x77,
+    0x78, 0x79, 0x7a, 0x7b, 0x7c, 0x7d, 0x7e, 0x7f,
   };
   for (unsigned short i = 0; i < sizeof(data); i += BLOCK_SIZE) {
     writeBlock(&data[i], i, min(BLOCK_SIZE, sizeof(data) - i));
@@ -313,6 +331,24 @@ static void printBlock(unsigned short a, unsigned short b) {
   Serial.println();
   readDisable();
   chipDisable();
+}
+
+static void file(unsigned short s) {
+  if (s > MAX_ADDR) return;
+  byte buf[BLOCK_SIZE];
+  unsigned short i = 0;
+  while (i < s) {
+    if (Serial.available()) {
+      buf[i % BLOCK_SIZE] = Serial.read();
+      i++;
+      if (i > 0 && i % BLOCK_SIZE == 0) {
+        writeBlock(buf, i - BLOCK_SIZE, BLOCK_SIZE);
+      }
+    }
+  }
+  if (i % BLOCK_SIZE != 0) {
+    writeBlock(buf, i - (i % BLOCK_SIZE), i % BLOCK_SIZE);
+  }
 }
 
 static char cmd[255];
@@ -451,7 +487,7 @@ static void execute() {
     int a = readInt();
     int b = readInt();
     if (a < 0 || b < 0) {
-      Serial.println("block range cannot be negative");
+      Serial.println("error: block range cannot be negative");
       return;
     }
     printBlock(a, b);
@@ -515,6 +551,20 @@ static void execute() {
   }
 
   // large block
+  if (match("file!")) {
+    if (isFastBaud()) {
+      Serial.println("error: switch to slow Baud rate");
+      return;
+    }
+    int s = readInt();
+    if (s < 0) {
+      Serial.println("error: size cannot be negative");
+      return;
+    }
+    skipWhite();
+    file(s);
+    return;
+  }
   if (match("zero!")) {
     zero();
     return;
@@ -529,6 +579,14 @@ static void execute() {
   }
 
   // misc
+  if (match("slow")) {
+    setSlowBaud();
+    return;
+  }
+  if (match("fast")) {
+    setFastBaud();
+    return;
+  }
   if (match("help")) {
     Serial.println("read  <addr>         read a byte");
     Serial.println("write <addr> <data>  write a byte");
@@ -549,24 +607,27 @@ static void execute() {
     Serial.println("lock!   set software data protection");
     Serial.println();
     Serial.println("-- large block operations --");
-    Serial.println("zero!    zero-out the EEPROM");
-    Serial.println("user!    write the user data (i.e., your custom code)");
-    Serial.println("all      print the entire EEPROM");
+    Serial.println("file! <size> load an file in the EEPROM");
+    Serial.println("zero!        zero-out the EEPROM");
+    Serial.println("user!        write the user data (i.e., your custom code)");
+    Serial.println("all          print the entire EEPROM");
     Serial.println();
     Serial.println("-- misc --");
-    Serial.println("help:  print this help");
+    Serial.println("slow  set Baud rate to 9600 (for data upload)");
+    Serial.println("fast  set Baud rate to 230400 (for data download)");
+    Serial.println("help  print this help");
     return;
   }
   Serial.println("error: unknown command -- type 'help' for help");
 }
 
 static void initPins() {
-  pinMode(PIN_CE, OUTPUT);
-  pinMode(PIN_WE, OUTPUT);
-  pinMode(PIN_OE, OUTPUT);
   chipDisable();
+  pinMode(PIN_CE, OUTPUT);
   writeDisable();
+  pinMode(PIN_WE, OUTPUT);
   readDisable();
+  pinMode(PIN_OE, OUTPUT);
 
   DDR_ADDR_HI |= 0x7f; // set all (bust most significant) address bits bit to output
   DDR_ADDR_LO = 0xff;  // all low address bits to output
@@ -582,7 +643,7 @@ static void initPins() {
 
 void setup() {
   initPins();
-  Serial.begin(BAUD_RATE);
+  setFastBaud();
   delay(1); // 15ns data write protection at start-up
 }
 
